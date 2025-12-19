@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Administrador de campos - Atletas</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <header class="sticky top-0 z-10 bg-slate-950/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
+      <a href="./ranking.html" class="text-slate-300 hover:text-white">← Ranking</a>
+      <div class="font-black text-xl">⚙️ Configurar campos de registro (Atletas)</div>
+      <a href="./athletes.html" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">
+        Ver formulario atletas
+      </a>
+    </div>
+  </header>
+  <main class="max-w-5xl mx-auto px-4 py-6 grid gap-4">
+    <!-- Sección de creación/actualización de campo -->
+    <section class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
+      <div class="font-bold text-lg">Crear / actualizar campo</div>
+      <form id="fieldForm" class="mt-4 grid gap-3">
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="grid gap-1">
+            <span class="text-sm text-slate-300">Key (único, sin espacios)</span>
+            <input id="key" required placeholder="Ej: team, city, coach_name" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+          </label>
+          <label class="grid gap-1">
+            <span class="text-sm text-slate-300">Etiqueta (label)</span>
+            <input id="label" required placeholder="Ej: Equipo / Ciudad / Entrenador" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+          </label>
+        </div>
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="grid gap-1">
+            <span class="text-sm text-slate-300">Tipo</span>
+            <select id="type" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2">
+              <option value="text">text</option>
+              <option value="number">number</option>
+              <option value="select">select</option>
+              <option value="textarea">textarea</option>
+              <option value="date">date</option>
+            </select>
+          </label>
+          <label class="grid gap-1">
+            <span class="text-sm text-slate-300">Orden</span>
+            <input id="sort_order" type="number" value="100" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+          </label>
+          <label class="grid gap-1">
+            <span class="text-sm text-slate-300">Placeholder</span>
+            <input id="placeholder" placeholder="Texto guía" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+          </label>
+        </div>
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2">
+            <input id="required" type="checkbox" class="scale-110" />
+            <span class="text-sm">Requerido</span>
+          </label>
+          <label class="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2">
+            <input id="enabled" type="checkbox" class="scale-110" checked />
+            <span class="text-sm">Habilitado</span>
+          </label>
+          <div></div>
+        </div>
+        <div id="optionsBlock" class="hidden grid gap-1">
+          <span class="text-sm text-slate-300">Opciones (solo si type=select)</span>
+          <textarea id="options" rows="4" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-sm" placeholder='Ej 1: ["Sub-18","Abierta","Master"]
+Ej 2: [{"label":"Masculino","value":"M"},{"label":"Femenino","value":"F"}]'></textarea>
+          <div class="text-xs text-slate-400">
+            Debe ser JSON válido. Puedes usar lista simple o lista de objetos {label,value}.
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="bg-emerald-400 text-slate-950 rounded-xl px-4 py-3 font-black">
+            Guardar (insert/update)
+          </button>
+          <button type="button" id="resetBtn" class="bg-slate-100 text-slate-900 rounded-xl px-4 py-3 font-semibold">
+            Limpiar
+          </button>
+          <div id="msg" class="text-sm text-slate-300 self-center"></div>
+        </div>
+      </form>
+    </section>
+    <!-- Lista de campos configurados -->
+    <section class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
+      <div class="flex items-center gap-2">
+        <div class="font-bold text-lg">Campos configurados</div>
+        <button id="reload" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">Refrescar</button>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-300">
+            <tr class="[&>th]:py-2 [&>th]:px-3 text-left border-b border-slate-800">
+              <th>Orden</th>
+              <th>Key</th>
+              <th>Label</th>
+              <th>Tipo</th>
+              <th>Req</th>
+              <th>Enabled</th>
+              <th>Opciones</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="fieldsBody" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+<script>
+  // Configuración de Supabase
+  const SUPABASE_URL = "https://djoaknkhbtvbovcivi.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const msg = document.getElementById("msg");
+  const fieldsBody = document.getElementById("fieldsBody");
+  const typeSel = document.getElementById("type");
+  const optionsBlock = document.getElementById("optionsBlock");
+
+  // Mostrar/ocultar bloque de opciones según tipo
+  function showOptionsIfNeeded(){
+    optionsBlock.classList.toggle("hidden", typeSel.value !== "select");
+  }
+  typeSel.addEventListener("change", showOptionsIfNeeded);
+  showOptionsIfNeeded();
+
+  // Rellena el formulario para editar un campo
+  function fillForm(f) {
+    document.getElementById("key").value = f.key;
+    document.getElementById("key").readOnly = true;
+    document.getElementById("label").value = f.label;
+    document.getElementById("type").value = f.type;
+    document.getElementById("required").checked = !!f.required;
+    document.getElementById("enabled").checked = !!f.enabled;
+    document.getElementById("sort_order").value = f.sort_order ?? 100;
+    document.getElementById("placeholder").value = f.placeholder ?? "";
+    document.getElementById("options").value = f.options ? JSON.stringify(f.options, null, 2) : "";
+    showOptionsIfNeeded();
+  }
+
+  // Restablece el formulario a su estado inicial
+  function resetForm(){
+    document.getElementById("fieldForm").reset();
+    document.getElementById("key").readOnly = false;
+    document.getElementById("enabled").checked = true;
+    document.getElementById("sort_order").value = 100;
+    msg.textContent = "";
+    showOptionsIfNeeded();
+  }
+  document.getElementById("resetBtn").addEventListener("click", resetForm);
+
+  // Cargar campos existentes y mostrarlos en la tabla
+  async function loadFields() {
+    const { data, error } = await supabase
+      .from("athlete_fields")
+      .select("*")
+      .order("sort_order", { ascending: true });
+    if (error) { console.error(error); return; }
+    fieldsBody.innerHTML = "";
+    (data || []).forEach(f => {
+      const optPreview = f.type === "select" ? JSON.stringify(f.options ?? []) : "";
+      const tr = document.createElement("tr");
+      tr.className = "[&>td]:py-2 [&>td]:px-3";
+      tr.innerHTML = `
+        <td>${f.sort_order ?? ""}</td>
+        <td class="font-semibold">${f.key}</td>
+        <td>${f.label}</td>
+        <td>${f.type}</td>
+        <td>${f.required ? "✅" : ""}</td>
+        <td>${f.enabled ? "✅" : ""}</td>
+        <td class="text-slate-300 max-w-[260px] truncate">${optPreview}</td>
+        <td class="whitespace-nowrap">
+          <button class="editBtn bg-slate-100 text-slate-900 rounded-lg px-2 py-1 text-xs font-semibold" data-key="${f.key}">
+            Editar
+          </button>
+          <button class="delBtn bg-red-500 text-white rounded-lg px-2 py-1 text-xs font-semibold ml-2" data-key="${f.key}">
+            Borrar
+          </button>
+        </td>
+      `;
+      fieldsBody.appendChild(tr);
+    });
+    // Asignar eventos a botones de editar y borrar
+    document.querySelectorAll(".editBtn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const key = btn.dataset.key;
+        const { data, error } = await supabase.from("athlete_fields").select("*").eq("key", key).single();
+        if (error) return;
+        fillForm(data);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+    document.querySelectorAll(".delBtn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const key = btn.dataset.key;
+        if (!confirm(`¿Borrar campo "${key}"?`)) return;
+        const { error } = await supabase.from("athlete_fields").delete().eq("key", key);
+        if (error) { msg.textContent = "Error: " + error.message; return; }
+        msg.textContent = "🗑️ Campo borrado.";
+        await loadFields();
+      });
+    });
+  }
+  document.getElementById("reload").addEventListener("click", loadFields);
+
+  // Guardar campo (insert/update)
+  document.getElementById("fieldForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    msg.textContent = "Guardando...";
+    try {
+      const key = document.getElementById("key").value.trim();
+      if (!/^[a-zA-Z0-9_]+$/.test(key)) throw new Error("Key inválido. Usa letras, números y _");
+      const type = document.getElementById("type").value;
+      let options = null;
+      if (type === "select") {
+        const raw = document.getElementById("options").value.trim();
+        options = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(options)) throw new Error("Opciones debe ser un arreglo JSON.");
+      }
+      const payload = {
+        key,
+        label: document.getElementById("label").value.trim(),
+        type,
+        required: document.getElementById("required").checked,
+        enabled: document.getElementById("enabled").checked,
+        sort_order: parseInt(document.getElementById("sort_order").value, 10) || 100,
+        placeholder: document.getElementById("placeholder").value.trim() || null,
+        options
+      };
+      const { error } = await supabase.from("athlete_fields").upsert(payload, { onConflict: "key" });
+      if (error) throw error;
+      msg.textContent = "✅ Guardado.";
+      await loadFields();
+    } catch (err) {
+      msg.textContent = "Error: " + (err?.message || String(err));
+    }
+  });
+
+  // Inicializar
+  async function boot() {
+    await loadFields();
+    supabase
+      .channel("athlete-fields-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "athlete_fields" }, loadFields)
+      .subscribe();
+  }
+  boot();
+</script>
+</body>
+</html>
