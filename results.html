@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Registro de tiempos</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <header class="sticky top-0 z-10 bg-slate-950/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+      <a href="./ranking.html" class="text-slate-300 hover:text-white">← Ranking</a>
+      <div class="font-black text-xl">⏱️ Registrar tiempos</div>
+      <a href="./athletes.html" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">
+        Registrar atletas
+      </a>
+    </div>
+  </header>
+  <main class="max-w-3xl mx-auto px-4 py-6 grid gap-4">
+    <!-- Formulario de tiempos -->
+    <form id="resultForm" class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 grid gap-3">
+      <div class="grid gap-1">
+        <span class="text-sm text-slate-300">Atleta</span>
+        <select id="athleteSelect" required class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2"></select>
+        <div class="text-xs text-slate-400 mt-1">Tip: usa el buscador del navegador en móvil.</div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="grid gap-1">
+          <span class="text-sm text-slate-300">Prueba</span>
+          <input id="event_test" required placeholder="Ej: 5K" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+        </label>
+        <label class="grid gap-1">
+          <span class="text-sm text-slate-300">Tiempo (mm:ss.mmm)</span>
+          <input id="time_text" required placeholder="Ej: 12:34.567" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+        </label>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="grid gap-1">
+          <span class="text-sm text-slate-300">Registrado por (opcional)</span>
+          <input id="recorded_by" placeholder="Juez 1" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+        </label>
+        <label class="grid gap-1">
+          <span class="text-sm text-slate-300">Observaciones (opcional)</span>
+          <input id="notes" placeholder="Ej: penalización..." class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2" />
+        </label>
+      </div>
+      <button class="bg-emerald-400 text-slate-950 rounded-xl px-4 py-3 font-black">
+        Guardar tiempo (se actualiza ranking en vivo)
+      </button>
+      <div id="msg" class="text-sm text-slate-300"></div>
+    </form>
+    <!-- Últimos tiempos -->
+    <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
+      <div class="flex items-center gap-2">
+        <div class="font-bold">Últimos tiempos registrados</div>
+        <button id="reload" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">Refrescar</button>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-300">
+            <tr class="[&>th]:py-2 [&>th]:px-3 text-left border-b border-slate-800">
+              <th>Atleta</th>
+              <th>Prueba</th>
+              <th>Tiempo</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+<script>
+  // Configuración de Supabase
+  const SUPABASE_URL = "https://djoaknkhbtvbovcivi.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const athleteSelect = document.getElementById("athleteSelect");
+  const msg = document.getElementById("msg");
+  const resultsBody = document.getElementById("resultsBody");
+
+  // Formatea fecha
+  function fmtDate(iso){ return new Date(iso).toLocaleString("es-CO",{hour12:false}); }
+
+  // Convierte mm:ss.mmm a milisegundos
+  function timeToMs(t) {
+    const s = (t || "").trim();
+    const parts = s.split(":");
+    let minutes = 0;
+    let rest = s;
+    if (parts.length === 2) {
+      minutes = parseInt(parts[0], 10);
+      rest = parts[1];
+    } else if (parts.length !== 1) {
+      throw new Error("Formato inválido. Usa mm:ss.mmm");
+    }
+    const secParts = rest.split(".");
+    const seconds = parseInt(secParts[0], 10);
+    const millis = secParts[1] ? parseInt((secParts[1] + "000").slice(0,3), 10) : 0;
+    if ([minutes, seconds, millis].some(n => Number.isNaN(n))) {
+      throw new Error("Formato inválido. Usa mm:ss.mmm");
+    }
+    return (minutes * 60 * 1000) + (seconds * 1000) + millis;
+  }
+
+  // Cargar atletas en el selector
+  async function loadAthletes() {
+    const { data, error } = await supabase
+      .from("athletes")
+      .select("id, full_name, document_number, category, sex, event_test")
+      .order("full_name", { ascending: true })
+      .limit(1000);
+    if (error) { console.error(error); return; }
+    athleteSelect.innerHTML = "";
+    (data || []).forEach(a => {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = `${a.full_name} • ${a.document_number} • ${a.category} • ${a.sex} • ${a.event_test}`;
+      opt.dataset.event_test = a.event_test;
+      athleteSelect.appendChild(opt);
+    });
+    const first = athleteSelect.selectedOptions[0];
+    if (first) document.getElementById("event_test").value = first.dataset.event_test || "";
+  }
+  athleteSelect.addEventListener("change", () => {
+    const opt = athleteSelect.selectedOptions[0];
+    if (opt) document.getElementById("event_test").value = opt.dataset.event_test || "";
+  });
+
+  // Cargar últimos resultados
+  async function loadRecentResults() {
+    const { data, error } = await supabase
+      .from("results")
+      .select("id, event_test, time_text, created_at, athletes(full_name)")
+      .order("created_at", { ascending: false })
+      .limit(25);
+    if (error) { console.error(error); return; }
+    resultsBody.innerHTML = "";
+    (data || []).forEach(r => {
+      const tr = document.createElement("tr");
+      tr.className = "[&>td]:py-2 [&>td]:px-3";
+      tr.innerHTML = `
+        <td class="font-semibold">${r.athletes?.full_name ?? "-"}</td>
+        <td>${r.event_test}</td>
+        <td class="font-black text-emerald-300">${r.time_text}</td>
+        <td class="text-slate-300">${fmtDate(r.created_at)}</td>
+      `;
+      resultsBody.appendChild(tr);
+    });
+  }
+
+  // Manejo del envío del formulario
+  document.getElementById("resultForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    msg.textContent = "Guardando...";
+    try {
+      const athlete_id = athleteSelect.value;
+      const event_test = document.getElementById("event_test").value.trim();
+      const time_text = document.getElementById("time_text").value.trim();
+      const time_ms = timeToMs(time_text);
+      const payload = {
+        athlete_id,
+        event_test,
+        time_ms,
+        time_text,
+        recorded_by: document.getElementById("recorded_by").value.trim() || null,
+        notes: document.getElementById("notes").value.trim() || null
+      };
+      const { error } = await supabase.from("results").insert(payload);
+      if (error) throw error;
+      msg.textContent = "✅ Tiempo registrado. El ranking se actualizará en vivo.";
+      document.getElementById("time_text").value = "";
+      document.getElementById("notes").value = "";
+      await loadRecentResults();
+    } catch (err) {
+      msg.textContent = "Error: " + (err?.message || String(err));
+    }
+  });
+  // Botón refrescar últimos resultados
+  document.getElementById("reload").addEventListener("click", loadRecentResults);
+
+  // Inicio
+  async function boot() {
+    await loadAthletes();
+    await loadRecentResults();
+    // Actualizar resultados en tiempo real
+    supabase
+      .channel("results-live-local")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "results" }, async () => {
+        await loadRecentResults();
+      })
+      .subscribe();
+    // Actualizar lista de atletas si se agregan
+    supabase
+      .channel("athletes-live")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "athletes" }, async () => {
+        await loadAthletes();
+      })
+      .subscribe();
+  }
+  boot();
+</script>
+</body>
+</html>
