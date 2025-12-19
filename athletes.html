@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Registro de atletas</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <header class="sticky top-0 z-10 bg-slate-950/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items\u00a0center gap-3">
+      <a href="./ranking.html" class="text-slate-300 hover:text-white">← Ranking</a>
+      <div class="font-black text-xl">➕ Registrar atletas</div>
+      <a href="./results.html" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">
+        Ir a tiempos
+      </a>
+    </div>
+  </header>
+  <main class="max-w-3xl mx-auto px-4 py-6">
+    <!-- Formulario dinámico -->
+    <form id="athleteForm" class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 grid gap-3">
+      <div class="flex items-center gap-2">
+        <a class="text-xs text-slate-300 underline" href="./admin_fields.html">⚙️ Configurar campos</a>
+        <span class="text-xs text-slate-400">• el formulario se arma solo</span>
+      </div>
+      <div id="dynamicFields" class="grid gap-3"></div>
+      <button class="bg-emerald-400 text-slate-950 rounded-xl px-4 py-3 font-black">
+        Guardar atleta
+      </button>
+      <div id="msg" class="text-sm text-slate-300"></div>
+    </form>
+    <!-- Tabla de últimos atletas -->
+    <div class="mt-4 bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
+      <div class="flex items-center gap-2">
+        <div class="font-bold">Últimos atletas</div>
+        <button id="reload" class="ml-auto bg-slate-100 text-slate-900 rounded-xl px-3 py-2 text-sm font-semibold">Refrescar</button>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-300">
+            <tr class="[&>th]:py-2 [&>th]:px-3 text-left border-b border-slate-800">
+              <th>Nombre</th>
+              <th>Documento</th>
+              <th>Categoría</th>
+              <th>Sexo</th>
+              <th>Prueba</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody id="athletesBody" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+<script>
+  // Configura Supabase
+  const SUPABASE_URL = "https://djoaknkhbtvbovcivi.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Elementos del DOM
+  const dynamicFields = document.getElementById("dynamicFields");
+  const msg = document.getElementById("msg");
+  const athletesBody = document.getElementById("athletesBody");
+  let fieldDefs = [];
+
+  // Helpers
+  function fieldId(key){ return `f_${key}`; }
+  function normalizeSelectOptions(options){
+    if (!options) return [];
+    if (Array.isArray(options) && options.length && typeof options[0] === "string") {
+      return options.map(v => ({ label: v, value: v }));
+    }
+    return options;
+  }
+  function fmtDate(iso){ return new Date(iso).toLocaleString("es-CO",{hour12:false}); }
+
+  // Cargar definición de campos desde la tabla athlete_fields
+  async function loadFieldDefs() {
+    const { data, error } = await supabase
+      .from("athlete_fields")
+      .select("*")
+      .eq("enabled", true)
+      .order("sort_order", { ascending: true });
+    if (error) { console.error(error); fieldDefs = []; return; }
+    fieldDefs = data || [];
+  }
+
+  // Renderizar formulario dinámico según definiciones
+  function renderDynamicForm(){
+    dynamicFields.innerHTML = "";
+    fieldDefs.forEach(f => {
+      const wrapper = document.createElement("label");
+      wrapper.className = "grid gap-1";
+      wrapper.innerHTML = `<span class="text-sm text-slate-300">${f.label}${f.required ? " *" : ""}</span>`;
+      let input;
+      const common = "bg-slate-950 border border-slate-700 rounded-xl px-3 py-2";
+      if (f.type === "select") {
+        input = document.createElement("select");
+        input.className = common;
+        const opts = normalizeSelectOptions(f.options || []);
+        const emptyOpt = document.createElement("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = "Selecciona...";
+        input.appendChild(emptyOpt);
+        opts.forEach(o => {
+          const opt = document.createElement("option");
+          opt.value = o.value;
+          opt.textContent = o.label;
+          input.appendChild(opt);
+        });
+      } else if (f.type === "textarea") {
+        input = document.createElement("textarea");
+        input.rows = 3;
+        input.className = common;
+      } else {
+        input = document.createElement("input");
+        input.type = f.type === "number" ? "number" : (f.type === "date" ? "date" : "text");
+        input.className = common;
+      }
+      input.id = fieldId(f.key);
+      if (f.placeholder) input.placeholder = f.placeholder;
+      if (f.required) input.required = true;
+      wrapper.appendChild(input);
+      dynamicFields.appendChild(wrapper);
+    });
+  }
+
+  // Recolectar datos del formulario en un objeto
+  function collectAthletePayload(){
+    const payload = {};
+    fieldDefs.forEach(f => {
+      const el = document.getElementById(fieldId(f.key));
+      let v = (el?.value ?? "").trim();
+      if (v === "") v = null;
+      payload[f.key] = v;
+    });
+    return payload;
+  }
+
+  // Cargar últimos atletas
+  async function loadAthletes() {
+    const { data, error } = await supabase
+      .from("athletes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (error) { console.error(error); return; }
+    athletesBody.innerHTML = "";
+    (data || []).forEach(a => {
+      const tr = document.createElement("tr");
+      tr.className = "[&>td]:py-2 [&>td]:px-3";
+      tr.innerHTML = `
+        <td class="font-semibold">${a.full_name || ""}</td>
+        <td class="text-slate-300">${a.document_number || ""}</td>
+        <td>${a.category || ""}</td>
+        <td>${a.sex || ""}</td>
+        <td>${a.event_test || ""}</td>
+        <td class="text-slate-300">${fmtDate(a.created_at)}</td>
+      `;
+      athletesBody.appendChild(tr);
+    });
+  }
+
+  // Manejo del submit del formulario
+  document.getElementById("athleteForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    msg.textContent = "Guardando...";
+    const all = collectAthletePayload();
+    // Campos base conocidos
+    const base = {
+      full_name: all.full_name,
+      document_number: all.document_number,
+      category: all.category,
+      sex: all.sex,
+      event_test: all.event_test
+    };
+    // Campos adicionales (extra)
+    const extra = { ...all };
+    delete extra.full_name;
+    delete extra.document_number;
+    delete extra.category;
+    delete extra.sex;
+    delete extra.event_test;
+    const payload = { ...base, extra };
+    const { error } = await supabase.from("athletes").insert(payload);
+    if (error) {
+      msg.textContent = "Error: " + error.message;
+      return;
+    }
+    msg.textContent = "✅ Atleta registrado.";
+    e.target.reset();
+    await loadAthletes();
+  });
+  // Botón refrescar tabla
+  document.getElementById("reload").addEventListener("click", loadAthletes);
+
+  // Inicio
+  async function boot() {
+    await loadFieldDefs();
+    renderDynamicForm();
+    await loadAthletes();
+    // Actualiza el formulario si cambian las definiciones de campos
+    supabase
+      .channel("athlete-fields-form-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "athlete_fields" }, async () => {
+        await loadFieldDefs();
+        renderDynamicForm();
+      })
+      .subscribe();
+  }
+  boot();
+</script>
+</body>
+</html>
